@@ -1,0 +1,47 @@
+name: Build ONLYOFFICE iPad simulator app
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - build/onlyoffice-ipad-v9.1
+
+permissions:
+  contents: read
+
+jobs:
+  build-simulator:
+    name: Build Documents-opensource for iPad Simulator
+    runs-on: macos-15
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - name: Record build host
+        run: |
+          set -euo pipefail
+          sw_vers
+          xcodebuild -version
+          xcrun --sdk iphonesimulator --show-sdk-version
+          ruby --version
+          python3 --version
+
+      - name: Build and verify public editor package
+        env:
+          BUILD_ONLY: "1"
+        run: ./tools/build-ipad-simulator.sh
+
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onlyoffice-ipad-simulator-build-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            .local-artifacts/editors-v9.1.0-179/verification-report.json
+            .local-artifacts/DerivedData/Build/Products/Debug-iphonesimulator/*.app
