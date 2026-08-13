@@ -43,5 +43,5 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
           path: |
-            .local-artifacts/editors-v9.1.0-179/verification-report.json
+            ~/Library/Caches/ONLYOFFICE/editors-v9.1.0-179/verification-report.json
             .local-artifacts/DerivedData/Build/Products/Debug-iphonesimulator/*.app
