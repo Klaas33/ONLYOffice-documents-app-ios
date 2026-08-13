@@ -10,7 +10,10 @@ WORKSPACE="$ROOT/ONLYOFFICE-Documents-opensource.xcworkspace"
 SCHEME=Documents-opensource
 PACKAGE_URL=https://github.com/my-onlyoffice-forks/editors-ios-sp.git
 PACKAGE_REVISION=3f9fd21458ccdd0f528a048f81307d57111d7460
+TEMPLATE_URL=https://github.com/ONLYOFFICE/document-templates.git
+TEMPLATE_REVISION=71430c9f183489e8912f54f9dc859e369cf0dfb4
 PACKAGE_DIR=${ONLYOFFICE_PACKAGE_DIR:-"$ROOT/.local-artifacts/editors-ios-sp-v9.1"}
+TEMPLATE_DIR=${ONLYOFFICE_TEMPLATE_DIR:-"$(dirname "$ROOT")/document-templates"}
 ARTIFACT_DIR=${ONLYOFFICE_ARTIFACT_DIR:-"$HOME/Library/Caches/ONLYOFFICE/editors-v9.1.0-179"}
 DERIVED_DATA=${DERIVED_DATA:-"$ROOT/.local-artifacts/DerivedData"}
 BUNDLER_VERSION=${BUNDLER_VERSION:-2.5.23}
@@ -31,6 +34,16 @@ fi
 git -C "$PACKAGE_DIR" fetch --tags origin
 git -C "$PACKAGE_DIR" checkout --detach "$PACKAGE_REVISION"
 [[ $(git -C "$PACKAGE_DIR" rev-parse HEAD) == "$PACKAGE_REVISION" ]] || { echo "ERROR: package revision mismatch" >&2; exit 2; }
+
+# The public source snapshot refers to this sibling repository as folder
+# references. Pin it explicitly so missing template folders cannot fail Xcode.
+if [[ ! -d "$TEMPLATE_DIR/.git" ]]; then
+  git clone "$TEMPLATE_URL" "$TEMPLATE_DIR"
+fi
+git -C "$TEMPLATE_DIR" fetch --tags origin
+git -C "$TEMPLATE_DIR" checkout --detach "$TEMPLATE_REVISION"
+[[ $(git -C "$TEMPLATE_DIR" rev-parse HEAD) == "$TEMPLATE_REVISION" ]] || { echo "ERROR: document template revision mismatch" >&2; exit 2; }
+[[ -d "$TEMPLATE_DIR/sample" && -d "$TEMPLATE_DIR/new" ]] || { echo "ERROR: required document template folders are absent" >&2; exit 2; }
 
 # This downloads all 22 declared ZIP archives and retains each only if the
 # Package.swift SHA-256 matches. SwiftPM/Xcode independently rechecks these

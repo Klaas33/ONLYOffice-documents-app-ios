@@ -12,6 +12,7 @@ The build is deliberately a **Simulator** build, so it has no signing identity. 
 
 - App source: `develop` at `165ea4d357956d7db1260527b884b7de6f5fcb84`.
 - Controlled public package source: `https://github.com/my-onlyoffice-forks/editors-ios-sp.git`, tag `v9.1`, commit `3f9fd21458ccdd0f528a048f81307d57111d7460`.
+- Required public sibling folder resource source: `https://github.com/ONLYOFFICE/document-templates.git`, commit `71430c9f183489e8912f54f9dc859e369cf0dfb4` (provides the project-referenced `sample` and `new` folders).
 - The project and `Package.resolved` now target that v9.1 package rather than the deleted original URL.
 - `tools/verify_editor_artifacts.py` downloads only package-manifest URLs and verifies SHA-256 before retaining a ZIP.
 - Local verification completed: **22/22 archives, 287,521,000 bytes total**. The machine-readable record is deliberately ignored at `.local-artifacts/editors-v9.1.0-179/verification-report.json`.
@@ -60,7 +61,7 @@ On the Mac, from the repository root:
 The script performs these steps:
 
 1. Confirms macOS/Xcode availability.
-2. Clones the preserved public package and detaches to the exact v9.1 commit.
+2. Clones the preserved public editor package and public `document-templates` folder resource, detaching both to the recorded commits.
 3. Downloads and verifies all 22 archives against `Package.swift` before use.
 4. Runs the repository’s Bundler/CocoaPods setup (`Podfile.lock` specifies CocoaPods 1.15.2).
 5. Resolves packages from the controlled package URL, creates/boots an available iPad Simulator, builds `Documents-opensource` for `iphonesimulator`, installs it, and launches it.
