@@ -45,9 +45,9 @@ python3 "$ROOT/tools/verify_editor_artifacts.py" \
 command -v gem >/dev/null || { echo "ERROR: RubyGems is required." >&2; exit 2; }
 gem install bundler --no-document --version "$BUNDLER_VERSION"
 cd "$ROOT"
-bundle "_$BUNDLER_VERSION_" config set --local path .local-artifacts/bundle
-bundle "_$BUNDLER_VERSION_" install
-bundle "_$BUNDLER_VERSION_" exec pod install
+bundle "_${BUNDLER_VERSION}_" config set --local path .local-artifacts/bundle
+bundle "_${BUNDLER_VERSION}_" install
+bundle "_${BUNDLER_VERSION}_" exec pod install
 
 # Resolve the controlled public Swift package before building.
 xcodebuild -resolvePackageDependencies -workspace "$WORKSPACE" -scheme "$SCHEME" \
