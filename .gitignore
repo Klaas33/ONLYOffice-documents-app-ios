@@ -12,8 +12,7 @@ Thumbs.db
 *.ipa
 .swiftpm
 .build/
-.bundle/
-local_gems/
+.local-artifacts/
 
 Pods
 fastlane/report.xml

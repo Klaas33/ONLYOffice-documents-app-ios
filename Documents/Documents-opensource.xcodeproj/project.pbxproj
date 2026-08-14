@@ -5162,10 +5162,10 @@
 		};
 		FC87B4642BBBEBD900DBDBDD /* XCRemoteSwiftPackageReference "editors-ios-sp" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/ONLYOFFICE/editors-ios-sp";
+			repositoryURL = "https://github.com/my-onlyoffice-forks/editors-ios-sp.git";
 			requirement = {
-				branch = main;
-				kind = branch;
+				kind = revision;
+				revision = 0c584d936384402f090f1d66823c42186a2ed972;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
