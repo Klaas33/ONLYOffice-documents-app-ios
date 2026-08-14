@@ -1,0 +1,172 @@
+name: Build and upload ONLYOFFICE iPad device app
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-upload:
+    name: Build signed IPA and upload to BrowserStack
+    runs-on: macos-15
+    timeout-minutes: 90
+    env:
+      APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+      IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+      BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+      P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+      BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+      BROWSERSTACK_USERNAME: ${{ secrets.BROWSERSTACK_USERNAME }}
+      BROWSERSTACK_ACCESS_KEY: ${{ secrets.BROWSERSTACK_ACCESS_KEY }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # The hotfix/v9.2.1/181 editor frameworks require Swift 6.2.
+      - name: Select compatible Xcode toolchain
+        run: |
+          set -euo pipefail
+          test -d /Applications/Xcode_26.0.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.0.app/Contents/Developer
+          xcodebuild -version
+          swift --version
+
+      - name: Validate required configuration names
+        run: |
+          set -euo pipefail
+          for name in APPLE_TEAM_ID IOS_BUNDLE_ID BUILD_CERTIFICATE_BASE64 P12_PASSWORD BUILD_PROVISION_PROFILE_BASE64 BROWSERSTACK_USERNAME BROWSERSTACK_ACCESS_KEY; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "ERROR: required GitHub Actions secret or variable is missing: $name" >&2
+              exit 2
+            fi
+          done
+
+      - name: Install temporary Apple signing assets
+        id: signing
+        run: |
+          set -euo pipefail
+          CERTIFICATE_PATH="$RUNNER_TEMP/build-certificate.p12"
+          PROFILE_PATH="$RUNNER_TEMP/build-profile.mobileprovision"
+          PROFILE_PLIST="$RUNNER_TEMP/build-profile.plist"
+          KEYCHAIN_PATH="$RUNNER_TEMP/onlyoffice-signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          printf '%s' "$BUILD_CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          printf '%s' "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > "$PROFILE_PATH"
+          chmod 600 "$CERTIFICATE_PATH" "$PROFILE_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH" >/dev/null
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+          security find-identity -v -p codesigning "$KEYCHAIN_PATH" | grep -q 'Apple Development'
+
+          security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST"
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print :UUID' "$PROFILE_PLIST")
+          PROFILE_TEAM=$(/usr/libexec/PlistBuddy -c 'Print :TeamIdentifier:0' "$PROFILE_PLIST")
+          PROFILE_APP_ID=$(/usr/libexec/PlistBuddy -c 'Print :Entitlements:application-identifier' "$PROFILE_PLIST")
+          EXPECTED_APP_ID="$APPLE_TEAM_ID.$IOS_BUNDLE_ID"
+
+          [[ "$PROFILE_TEAM" == "$APPLE_TEAM_ID" ]] || { echo 'ERROR: provisioning profile team does not match APPLE_TEAM_ID' >&2; exit 2; }
+          [[ "$PROFILE_APP_ID" == "$EXPECTED_APP_ID" ]] || { echo 'ERROR: use an explicit development profile for IOS_BUNDLE_ID (wildcard or mismatched profile supplied)' >&2; exit 2; }
+
+          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
+          cp "$PROFILE_PATH" "$HOME/Library/MobileDevice/Provisioning Profiles/$PROFILE_UUID.mobileprovision"
+          echo "profile_uuid=$PROFILE_UUID" >> "$GITHUB_OUTPUT"
+          echo "keychain_path=$KEYCHAIN_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Build signed real-device IPA
+        env:
+          BUILD_PLATFORM: device
+          BUILD_ONLY: "1"
+          PROVISIONING_PROFILE_SPECIFIER: ${{ steps.signing.outputs.profile_uuid }}
+        run: ./tools/build-ipad-simulator.sh
+
+      - name: Verify signed IPA
+        id: ipa
+        run: |
+          set -euo pipefail
+          IPA=.local-artifacts/device/ONLYOFFICE-Documents-v9.2.0-device.ipa
+          [[ -s "$IPA" ]]
+          unzip -q "$IPA" -d "$RUNNER_TEMP/ipa-check"
+          APP=$(find "$RUNNER_TEMP/ipa-check/Payload" -maxdepth 1 -name '*.app' -type d | head -n 1)
+          [[ -n "$APP" && -f "$APP/embedded.mobileprovision" ]]
+          codesign --verify --deep --strict "$APP"
+          ARCHS=$(lipo -archs "$APP/Documents")
+          [[ " $ARCHS " == *' arm64 '* ]]
+          VERSION=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
+          [[ "$VERSION" == 9.2.0 ]]
+          [[ "$BUNDLE_ID" == "$IOS_BUNDLE_ID" ]]
+          SHA256=$(shasum -a 256 "$IPA" | awk '{print $1}')
+          echo "path=$IPA" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "Verified signed arm64 IPA, version $VERSION, SHA-256 $SHA256"
+
+      - name: Upload IPA directly to BrowserStack App Automate
+        id: browserstack
+        env:
+          IPA_PATH: ${{ steps.ipa.outputs.path }}
+        run: |
+          set -euo pipefail
+          RESPONSE="$RUNNER_TEMP/browserstack-upload.json"
+          HTTP_CODE=$(curl --silent --show-error \
+            --user "$BROWSERSTACK_USERNAME:$BROWSERSTACK_ACCESS_KEY" \
+            --output "$RESPONSE" --write-out '%{http_code}' \
+            --request POST 'https://api-cloud.browserstack.com/app-automate/upload' \
+            --form "file=@$IPA_PATH" \
+            --form 'custom_id=onlyoffice-documents-ios-v9.2.0' \
+            --form 'ios_keychain_support=true')
+          if [[ "$HTTP_CODE" != 200 ]]; then
+            echo "ERROR: BrowserStack upload returned HTTP $HTTP_CODE" >&2
+            python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(d.get("error", "upload failed"), file=sys.stderr)' "$RESPONSE" || true
+            exit 2
+          fi
+          APP_URL=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["app_url"])' "$RESPONSE")
+          [[ "$APP_URL" == bs://* ]]
+          echo "app_url=$APP_URL" >> "$GITHUB_OUTPUT"
+          echo "BrowserStack app: $APP_URL"
+
+      - name: Record reproducible build evidence
+        if: success()
+        env:
+          IPA_SHA256: ${{ steps.ipa.outputs.sha256 }}
+          BROWSERSTACK_APP_URL: ${{ steps.browserstack.outputs.app_url }}
+        run: |
+          set -euo pipefail
+          mkdir -p .local-artifacts/device/evidence
+          cat > .local-artifacts/device/evidence/build-evidence.txt <<EOF
+          app_source_repository=https://github.com/Klaas33/ONLYOffice-documents-app-ios
+          app_source_revision=$GITHUB_SHA
+          upstream_app_revision=32f08f75327846afc491c5a1e449e8dff9d02fc8
+          app_version=9.2.0
+          editor_package_repository=https://github.com/my-onlyoffice-forks/editors-ios-sp.git
+          editor_package_revision=0c584d936384402f090f1d66823c42186a2ed972
+          editor_binary_release=hotfix/v9.2.1/181
+          editor_binary_verification=22/22
+          ipa_sha256=$IPA_SHA256
+          browserstack_app_url=$BROWSERSTACK_APP_URL
+          EOF
+          cat .local-artifacts/device/evidence/build-evidence.txt >> "$GITHUB_STEP_SUMMARY"
+
+      # Do not upload the IPA as a public-repository Actions artifact: it embeds
+      # the user's provisioning profile. The IPA goes directly to BrowserStack.
+      - name: Upload non-sensitive build evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onlyoffice-ipad-device-evidence-${{ github.run_id }}
+          retention-days: 7
+          path: .local-artifacts/device/evidence/build-evidence.txt
+
+      - name: Remove temporary signing assets
+        if: always()
+        run: |
+          security delete-keychain "${{ steps.signing.outputs.keychain_path }}" 2>/dev/null || true
+          rm -f "$RUNNER_TEMP/build-certificate.p12" "$RUNNER_TEMP/build-profile.mobileprovision" "$RUNNER_TEMP/build-profile.plist"

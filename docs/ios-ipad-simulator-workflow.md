@@ -35,8 +35,9 @@ The apparent editor `release/v9.3.0` branch is deliberately described by its rea
 2. runs `tools/verify_editor_artifacts.py`, which downloads every manifest-declared ZIP and retains it only when its SHA-256 equals the manifest checksum;
 3. installs the CocoaPods dependencies pinned by `Gemfile.lock`;
 4. resolves Swift packages from the public mirror pinned in the Xcode project and `Package.resolved`;
-5. builds `Documents-opensource` with Xcode 26 for `iphonesimulator`, with signing disabled; and
-6. when run interactively on a Mac, creates/boots an iPad Simulator, installs the app, adds a harmless local RTF, and launches the app.
+5. normally builds `Documents-opensource` with Xcode 26 for `iphonesimulator`, with signing disabled;
+6. with `BUILD_PLATFORM=device`, builds a development-signed arm64 IPA using a new user-owned bundle ID and no private ONLYOFFICE entitlements; and
+7. when run interactively on a Mac, creates/boots an iPad Simulator, installs the app, adds a harmless local RTF, and launches the app.
 
 GitHub Actions sets `BUILD_ONLY=1`, so it compiles and uploads the Simulator `.app` plus `verification-report.json` without trying to allocate a GUI Simulator.
 
@@ -77,9 +78,80 @@ On a legitimate Apple Mac host:
 
 ## BrowserStack real-iPad stage
 
-After the unsigned Simulator build passes, create a separate device archive on macOS using your Apple Development certificate, registered test-device provisioning profile, development team, and a bundle identifier covered by that profile. Store signing assets only as protected GitHub Actions secrets or install them interactively on the Mac. Never commit or paste certificate/private-key data, provisioning profiles, passwords, or BrowserStack access keys into source or chat.
+BrowserStack requires an iOS `.ipa` built for a real arm64 device. It re-signs uploaded iOS apps by default with its own provisioning profile. BrowserStack documents that this strips most entitlements; only basic signing/keychain entitlements remain. The device workflow therefore clears the preserved app's push, iCloud, and original-team keychain entitlements. Those optional service features are unavailable, while startup, local files, and native editors remain valid test targets.
 
-The resulting development-signed `.ipa` can be uploaded to BrowserStack App Automate and tested on a real iPad. Signing assets are the only unavoidable user-owned prerequisite for this stage.
+The workflow `.github/workflows/ios-browserstack-device.yml` builds a development-signed IPA and uploads it directly to BrowserStack. It deliberately does **not** publish the IPA as a public-repository Actions artifact because an IPA embeds its provisioning profile.
+
+### One-time Apple setup
+
+A paid Apple Developer Program membership with permission to create signing assets is required. In the Apple Developer portal, create:
+
+1. an explicit App ID owned by your team, using a new identifier such as `com.yourname.onlyoffice.documents` (do not use ONLYOFFICE's identifier);
+2. an Apple Development certificate exported with its private key as a password-protected `.p12`; and
+3. an **iOS App Development** provisioning profile for that exact App ID and certificate.
+
+Do not enable iCloud, push notifications, Sign in with Apple, associated domains, or other optional capabilities for this local-editor test build.
+
+In the fork's GitHub page, open **Settings → Secrets and variables → Actions** and add:
+
+Variables (not credentials):
+
+- `APPLE_TEAM_ID`: your 10-character Apple team ID.
+- `IOS_BUNDLE_ID`: the exact explicit App ID from above.
+
+Repository secrets:
+
+- `BUILD_CERTIFICATE_BASE64`: base64 of the `.p12` file.
+- `P12_PASSWORD`: the `.p12` export password.
+- `BUILD_PROVISION_PROFILE_BASE64`: base64 of the `.mobileprovision` file.
+- `BROWSERSTACK_USERNAME`: BrowserStack Automate username.
+- `BROWSERSTACK_ACCESS_KEY`: BrowserStack Automate access key.
+
+Use the GitHub browser UI; never paste these values into chat, source, command arguments, or logs. Then open **Actions → Build and upload ONLYOFFICE iPad device app → Run workflow** on branch `build/onlyoffice-ipad-v9.2.1`.
+
+The workflow checks that the profile's team and explicit application identifier match the variables, verifies the signed arm64 IPA, verifies all editor ZIP checksums again, and uploads the IPA to:
+
+```text
+POST https://api-cloud.browserstack.com/app-automate/upload
+custom_id=onlyoffice-documents-ios-v9.2.0
+```
+
+The successful workflow summary records the returned `bs://...` app URL and the IPA SHA-256, but no credentials or signing files.
+
+### Interactive testing through agent-device from WSL
+
+`agent-device` 0.20.8 is installed locally and includes a BrowserStack provider. In a private WSL terminal, collect the credentials without putting the access key in shell history:
+
+```sh
+read -r -p 'BrowserStack username: ' BROWSERSTACK_USERNAME
+read -r -s -p 'BrowserStack access key: ' BROWSERSTACK_ACCESS_KEY; printf '\n'
+export BROWSERSTACK_USERNAME BROWSERSTACK_ACCESS_KEY
+```
+
+Use the exact iPad model and iOS version offered by your BrowserStack account, plus the `bs://...` value from the successful workflow:
+
+```sh
+agent-device connect browserstack --platform ios \
+  --device 'EXACT BROWSERSTACK IPAD NAME' \
+  --provider-os-version 'EXACT IOS VERSION' \
+  --provider-app 'bs://APP-ID-FROM-WORKFLOW'
+```
+
+`connect` validates the credentials, device, and app without allocating a paid session. Follow the exact session name printed by the command. `open` creates the hosted App Automate session:
+
+```sh
+agent-device open com.yourname.onlyoffice.documents --session SESSION-NAME
+agent-device snapshot -i --session SESSION-NAME
+```
+
+After testing, release the hosted device and remove credentials from that shell:
+
+```sh
+agent-device close --session SESSION-NAME
+agent-device artifacts --json --session SESSION-NAME
+agent-device disconnect --session SESSION-NAME
+unset BROWSERSTACK_USERNAME BROWSERSTACK_ACCESS_KEY
+```
 
 ## Configuration limitations
 

@@ -23,8 +23,10 @@ SIMULATOR_NAME=${SIMULATOR_NAME:-"ONLYOFFICE iPad test"}
 SIMULATOR_DEVICE=${SIMULATOR_DEVICE:-"iPad Pro 13-inch (M4)"}
 BUNDLE_ID=${BUNDLE_ID:-"com.onlyoffice.Documents.opensource"}
 BUILD_ONLY=${BUILD_ONLY:-0}
+BUILD_PLATFORM=${BUILD_PLATFORM:-simulator}
+DEVICE_OUTPUT_DIR=${DEVICE_OUTPUT_DIR:-"$ROOT/.local-artifacts/device"}
 
-[[ $(uname -s) == Darwin ]] || { echo "ERROR: Xcode and iOS Simulator require a macOS host." >&2; exit 2; }
+[[ $(uname -s) == Darwin ]] || { echo "ERROR: Xcode and iOS builds require a macOS host." >&2; exit 2; }
 command -v xcodebuild >/dev/null || { echo "ERROR: Install Xcode from Apple, then run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer" >&2; exit 2; }
 command -v xcrun >/dev/null || { echo "ERROR: xcrun unavailable; select a complete Xcode installation." >&2; exit 2; }
 [[ -d "$WORKSPACE" ]] || { echo "ERROR: workspace not found: $WORKSPACE" >&2; exit 2; }
@@ -66,6 +68,50 @@ bundle "_${BUNDLER_VERSION}_" exec pod install
 # Resolve the controlled public Swift package before building.
 xcodebuild -resolvePackageDependencies -workspace "$WORKSPACE" -scheme "$SCHEME" \
   -clonedSourcePackagesDirPath "$ROOT/.local-artifacts/SourcePackages"
+
+# Build a development-signed arm64 app for BrowserStack real devices. The
+# opensource snapshot's iCloud/push/keychain entitlements belong to ONLYOFFICE's
+# former App ID and cannot be used by a new local development team. BrowserStack
+# also strips unsupported entitlements while re-signing. Override them for this
+# local-file/editor test build rather than impersonating the original App ID.
+if [[ "$BUILD_PLATFORM" == device ]]; then
+  : "${APPLE_TEAM_ID:?ERROR: APPLE_TEAM_ID is required for a device build}"
+  : "${IOS_BUNDLE_ID:?ERROR: IOS_BUNDLE_ID is required for a device build}"
+  : "${PROVISIONING_PROFILE_SPECIFIER:?ERROR: PROVISIONING_PROFILE_SPECIFIER is required for a device build}"
+
+  rm -rf "$DEVICE_OUTPUT_DIR"
+  mkdir -p "$DEVICE_OUTPUT_DIR"
+  xcodebuild build -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Debug \
+    -sdk iphoneos -destination 'generic/platform=iOS' \
+    -derivedDataPath "$DERIVED_DATA" \
+    CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Apple Development" \
+    DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+    PRODUCT_BUNDLE_IDENTIFIER="$IOS_BUNDLE_ID" \
+    PROVISIONING_PROFILE_SPECIFIER="$PROVISIONING_PROFILE_SPECIFIER" \
+    CODE_SIGN_ENTITLEMENTS="" \
+    IPHONEOS_DEPLOYMENT_TARGET=14.0
+
+  APP=$(find "$DERIVED_DATA/Build/Products/Debug-iphoneos" -maxdepth 1 -name '*.app' -type d | head -n 1)
+  [[ -n "$APP" ]] || { echo "ERROR: signed device app bundle not found" >&2; exit 2; }
+  [[ -f "$APP/embedded.mobileprovision" ]] || { echo "ERROR: provisioning profile was not embedded" >&2; exit 2; }
+  codesign --verify --deep --strict "$APP"
+
+  PACKAGE_ROOT="$DEVICE_OUTPUT_DIR/package"
+  mkdir -p "$PACKAGE_ROOT/Payload"
+  ditto "$APP" "$PACKAGE_ROOT/Payload/$(basename "$APP")"
+  IPA="$DEVICE_OUTPUT_DIR/ONLYOFFICE-Documents-v9.2.0-device.ipa"
+  (cd "$PACKAGE_ROOT" && ditto -c -k --sequesterRsrc Payload "$IPA")
+  [[ -s "$IPA" ]] || { echo "ERROR: IPA packaging failed" >&2; exit 2; }
+
+  IPA_SHA256=$(shasum -a 256 "$IPA" | awk '{print $1}')
+  echo "DEVICE_BUILD_READY"
+  echo "App: $APP"
+  echo "IPA: $IPA"
+  echo "IPA_SHA256: $IPA_SHA256"
+  exit 0
+fi
+
+[[ "$BUILD_PLATFORM" == simulator ]] || { echo "ERROR: BUILD_PLATFORM must be simulator or device" >&2; exit 2; }
 
 # A simulator app is not signed; do not use the snapshot's former team ID.
 # CI uses BUILD_ONLY=1 so it can compile without allocating a GUI simulator.
