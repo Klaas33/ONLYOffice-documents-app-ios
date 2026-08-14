@@ -21,6 +21,16 @@ jobs:
         with:
           submodules: false
 
+      # v9.1.0/179 editor frameworks were compiled with Swift 6.2 (Xcode 26.0).
+      # The macos-15 default is Xcode 16.4 / Swift 6.1, which cannot import them.
+      - name: Select compatible Xcode toolchain
+        run: |
+          set -euo pipefail
+          test -d /Applications/Xcode_26.0.app/Contents/Developer
+          sudo xcode-select -s /Applications/Xcode_26.0.app/Contents/Developer
+          xcodebuild -version
+          swift --version
+
       - name: Record build host
         run: |
           set -euo pipefail
