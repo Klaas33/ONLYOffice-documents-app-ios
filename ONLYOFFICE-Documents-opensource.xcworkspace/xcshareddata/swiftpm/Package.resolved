@@ -3,10 +3,9 @@
     {
       "identity" : "editors-ios-sp",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ONLYOFFICE/editors-ios-sp",
+      "location" : "https://github.com/my-onlyoffice-forks/editors-ios-sp.git",
       "state" : {
-        "branch" : "main",
-        "revision" : "3f9fd21458ccdd0f528a048f81307d57111d7460"
+        "revision" : "0c584d936384402f090f1d66823c42186a2ed972"
       }
     },
     {
