@@ -168,4 +168,29 @@ extension ASCEditorManager: DocumentEditorViewControllerDelegate {
     func documentRename(_ controller: DocumentEditor.DocumentEditorViewController, title: String, complation: @escaping ((Result<Bool, Error>) -> Void)) {
         editorDocumentRename(controller, title: title, complation: complation)
     }
+
+    // Required by editors-ios-sp v9.1. The preserved app snapshot has no
+    // form-submission or role-selection UI, so fail explicitly instead of
+    // reporting a submission that did not happen.
+    func documentFillFormDidSend(_ controller: DocumentEditor.DocumentEditorViewController, complation: @escaping (Result<Bool, Error>) -> Void) {
+        complation(.failure(NSError(
+            domain: "com.onlyoffice.Documents.opensource",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Form submission is unavailable in this open-source build."]
+        )))
+    }
+
+    func documentStartFillingForm(_ controller: DocumentEditor.DocumentEditorViewController, roles: [[String: Any]], complation: @escaping (Result<Bool, Error>) -> Void) {
+        complation(.failure(NSError(
+            domain: "com.onlyoffice.Documents.opensource",
+            code: 2,
+            userInfo: [NSLocalizedDescriptionKey: "Form role selection is unavailable in this open-source build."]
+        )))
+    }
+
+    // Avatars are a cloud collaboration enhancement. Returning no images is
+    // correct for local documents and avoids requiring cloud credentials.
+    func documentFetchAvatars(_ controller: DocumentEditor.DocumentEditorViewController, usersId: [String], completion: @escaping ([String: UIImage]) -> Void) {
+        completion([:])
+    }
 }

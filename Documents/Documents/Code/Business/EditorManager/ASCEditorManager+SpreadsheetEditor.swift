@@ -161,4 +161,10 @@ extension ASCEditorManager: SpreadsheetEditorViewControllerDelegate {
     func spreadsheetChartData(_ controller: SpreadsheetEditor.SpreadsheetEditorViewController, data: Data?) {
         //
     }
+
+    // v9.1 requests collaboration avatars. Local-file testing has no remote
+    // users, and this public snapshot has no avatar-service configuration.
+    func spreadsheetFetchAvatars(_ controller: SpreadsheetEditor.SpreadsheetEditorViewController, usersId: [String], completion: @escaping ([String: UIImage]) -> Void) {
+        completion([:])
+    }
 }

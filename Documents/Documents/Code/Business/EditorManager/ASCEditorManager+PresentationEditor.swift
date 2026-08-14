@@ -157,4 +157,10 @@ extension ASCEditorManager: PresentationEditorViewControllerDelegate {
     func presentationRename(_ controller: PresentationEditor.PresentationEditorViewController, title: String, complation: @escaping ((Result<Bool, Error>) -> Void)) {
         editorDocumentRename(controller, title: title, complation: complation)
     }
+
+    // v9.1 requests collaboration avatars. Local-file testing has no remote
+    // users, and this public snapshot has no avatar-service configuration.
+    func presentationFetchAvatars(_ controller: PresentationEditor.PresentationEditorViewController, usersId: [String], completion: @escaping ([String: UIImage]) -> Void) {
+        completion([:])
+    }
 }
